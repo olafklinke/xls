@@ -129,6 +129,7 @@ CCALL(xls_cell_hidden,          XLSCell -> IO Int8 -- Int8)
 data XlsException =
       XlsFileNotFound String
     | XlsParseError String
+    | Libxls XLSError
     deriving (Show, Typeable)
 
 instance Exception XlsException
@@ -136,6 +137,7 @@ instance Exception XlsException
 exceptionLeft :: XlsException -> Either XLSError a
 exceptionLeft (XlsFileNotFound _) = Left LIBXLS_ERROR_OPEN
 exceptionLeft (XlsParseError   _) = Left LIBXLS_ERROR_PARSE
+exceptionLeft (Libxls          e) = Left e
 
 catchXls :: IO a -> IO (Either XLSError a)
 catchXls = flip catch (return.exceptionLeft) . fmap Right 
@@ -179,15 +181,17 @@ decodeXlsByteString content = withSystemTempFile "decodeXlsByteString"
         hPut h content
         decodeXlsIO filePath
 
--- | Experimental: This function uses the @xls_open_buffer@ function of libxls.
-decodeXlsByteString' :: ByteString -> IO (Either XLSError [[[Cell]]])
+-- | Alternative to 'decodeXlsByteString': 
+-- This function uses the @xls_open_buffer@ function of libxls.
+-- Can throw 'XlsException' when decoding fails. 
+decodeXlsByteString' :: ByteString -> IO [[[Cell]]]
 decodeXlsByteString' bs = do
     (buf,buflen) <- toCBuffer bs
     enc <- newCString "UTF-8"
     outError <- malloc
     wb <- c_xls_open_buffer buf buflen enc outError
     e <- peek outError
-    case e of
+    either (throwIO. Libxls) return =<< case e of
         LIBXLS_OK -> decodeXLSWorkbook Nothing wb
         _         -> return (Left e) 
 
